@@ -190,3 +190,248 @@ def save_json(path, data):
 
 def collate_fn(batch):
     return torch.as_tensor(np.array(batch), dtype=torch.float)
+
+
+def filter_points_with_mask(points, mask, point_mpp=0.24, mask_mpp=8.0, margin=1):
+    """
+    Filtre les points situés en dehors du masque binaire.
+
+    Args:
+        points: liste de dicts [{'x','y','type','prob'}]
+        mask: masque binaire (0: fond, 1: tissu)
+        point_mpp: résolution (µm/px) des points
+        mask_mpp: résolution (µm/px) du masque
+        margin: taille de la fenêtre autour du point pour vérification
+
+    Returns:
+        liste filtrée de points valides
+    """
+    scale = mask_mpp / point_mpp
+    valid_points = []
+
+    for pt in points:
+        x_px = int(np.round(pt["x"] / scale))
+        y_px = int(np.round(pt["y"] / scale))
+
+        # Zone autour du point
+        coords = [
+            (x_px + dx, y_px + dy)
+            for dx in [-margin, 0, margin]
+            for dy in [-margin, 0, margin]
+        ]
+        coords = [(x, y) for x, y in coords if 0 <= x < mask.shape[1] and 0 <= y < mask.shape[0]]
+        count_inside = sum(mask[y, x] for x, y in coords)
+
+        if count_inside / len(coords) >= 0.5:
+            valid_points.append(pt)
+
+    return valid_points
+
+
+def normalize_probs(points, min_prob=0.5):
+    """
+    Normalise les scores de confiance des détections à [min_prob, 1.0].
+    """
+    scores = [p["prob"] for p in points]
+    min_score = min(scores)
+    max_score = max(scores)
+    norm_points = []
+
+    for p in points:
+        norm = (p["prob"] - min_score) / (max_score - min_score + 1e-8)
+        p["prob"] = norm * (1 - min_prob) + min_prob
+        norm_points.append(p)
+
+    return norm_points
+
+
+def non_max_suppression(boxes, threshold=0.5):
+    """
+    Suppression non maximale (NMS) pour filtrer les boîtes qui se chevauchent trop.
+
+    Args:
+        boxes: tableau de forme [N, 5] : x1, y1, x2, y2, score
+        threshold: seuil de recouvrement (IoU)
+
+    Returns:
+        liste d’indices des boîtes retenues
+    """
+    if len(boxes) == 0:
+        return []
+
+    boxes = boxes.astype(float)
+    x1, y1, x2, y2, scores = boxes.T
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()[::-1]
+    keep = []
+
+    while len(order) > 0:
+        i = order[0]
+        keep.append(i)
+
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = np.maximum(0, xx2 - xx1 + 1)
+        h = np.maximum(0, yy2 - yy1 + 1)
+        inter = w * h
+        iou = inter / (areas[i] + areas[order[1:]] - inter)
+
+        order = order[1:][iou <= threshold]
+
+    return keep
+
+import numpy as np
+
+
+def nms(boxes: np.ndarray, threshold: float = 0.5):
+    """
+    Applique la suppression non maximale (NMS) sur des boîtes prédictives.
+
+    Args:
+        boxes: tableau [N, 5] avec (x1, y1, x2, y2, score)
+        threshold: seuil de recouvrement (IoU) à supprimer
+
+    Returns:
+        indices des boîtes conservées
+    """
+    if len(boxes) == 0:
+        return []
+
+    boxes = boxes.astype(float)
+    x1, y1, x2, y2, scores = boxes.T
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()[::-1]  # du + confiant au - confiant
+
+    keep = []
+    while len(order) > 0:
+        i = order[0]
+        keep.append(i)
+
+        # Intersection avec les autres boîtes
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = np.maximum(0, xx2 - xx1 + 1)
+        h = np.maximum(0, yy2 - yy1 + 1)
+        inter = w * h
+        iou = inter / (areas[i] + areas[order[1:]] - inter)
+
+        order = order[1:][iou <= threshold]
+
+    return keep
+
+
+def point_to_box(x, y, size, prob=None):
+    """
+    Transforme un point (x,y) en boîte carrée centrée sur ce point.
+
+    Args:
+        x, y: coordonnées du centre
+        size: demi-taille de la boîte (boîte = 2*size)
+        prob: optionnel, score de confiance
+
+    Returns:
+        boîte (x1, y1, x2, y2, [prob])
+    """
+    box = [x - size, y - size, x + size, y + size]
+    if prob is not None:
+        box.append(prob)
+    return np.array(box)
+
+
+def get_center_from_box(box, offset):
+    """
+    Calcule le centre d'une boîte à partir d'un coin haut-gauche et d’un rayon.
+
+    Args:
+        box: [x1, y1, x2, y2]
+        offset: (int) = demi-taille utilisée
+
+    Returns:
+        tuple (x, y)
+    """
+    return (box[0] + offset, box[1] + offset)
+
+
+
+def apply_nms_in_tiles(
+    detection_points: list[dict],
+    image_shape: tuple,
+    tile_size: int = 512,
+    box_size: int = 5,
+    overlap_thresh: float = 0.5,
+):
+    """
+    Applique la suppression non maximale (NMS) par tuiles sur une grande image.
+
+    Args:
+        detection_points: liste de dicts {'x','y','type','prob'}
+        image_shape: (H, W)
+        tile_size: taille d'une tuile
+        box_size: demi-taille des boîtes autour des points
+        overlap_thresh: seuil IoU pour suppression
+
+    Returns:
+        Liste filtrée des points après NMS
+    """
+    H, W = image_shape
+    final_points = []
+
+    for y0 in range(0, H, tile_size):
+        for x0 in range(0, W, tile_size):
+            x1, y1 = x0 + tile_size, y0 + tile_size
+
+            # Points dans la tuile
+            tile_points = [
+                p for p in detection_points
+                if x0 <= p["x"] < x1 and y0 <= p["y"] < y1
+            ]
+
+            if len(tile_points) < 2:
+                final_points.extend(tile_points)
+                continue
+
+            boxes = np.array([
+                [p["x"] - box_size, p["y"] - box_size,
+                 p["x"] + box_size, p["y"] + box_size, p["prob"]]
+                for p in tile_points
+            ])
+            keep = nms(boxes, threshold=overlap_thresh)
+            final_points.extend([tile_points[i] for i in keep])
+
+    return final_points
+
+
+def erode_mask(mask: np.ndarray, size: int = 3, iterations: int = 1):
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    return cv2.erode(mask.astype(np.uint8), kernel, iterations=iterations)
+
+
+def morph_postprocess(mask: np.ndarray, size: int = 3):
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    return mask
+
+
+def add_background_channel(mask: np.ndarray):
+    """
+    Ajoute un canal de fond pour la segmentation multi-classe.
+
+    Args:
+        mask: [C, H, W]
+
+    Returns:
+        mask_out: [C+1, H, W]
+    """
+    C, H, W = mask.shape
+    new_mask = np.zeros((C + 1, H, W), dtype=np.uint8)
+    union = np.any(mask, axis=0)
+    new_mask[0] = ~union
+    new_mask[1:] = mask
+    return new_mask.astype(np.uint8)
