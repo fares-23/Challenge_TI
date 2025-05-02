@@ -78,3 +78,6 @@ def json_to_xml(json_file, xml_file, prob_cutoff=0.0):
 # Usage example
 json_to_xml('example_files/detected-lymphocytes.json',
             'example_files/output.xml')
+
+json_to_xml(""
+            ,"/monkey-challenge-tuto/algorithm-tutorial/data/annotations_polygon/")
