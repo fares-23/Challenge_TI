@@ -4,18 +4,21 @@ from dataset import MonkeyDataset
 from model import HybridModel
 import torch.optim as optim
 
-DATA_DIR_CHRISTELLE = r"C:\Users\Christelle\Documents\CHALLENGE\images"
+DATA_DIR_CHRISTELLE = r"C:\Users\Christelle\Documents\CHALLENGE\images\ihc"
+ANNOTATIONS_DIR_CHRISTELLE = r"C:\Users\Christelle\Documents\CHALLENGE\annotations\json_mm"
 # DATA_DIR_ADAM = 
 TRAINED_MODEL_PATH = r"C:\Users\Christelle\Documents\CHALLENGE\Challenge_TI\base_code\trained_model"
 
 def train():
     # Config
     data_dir = DATA_DIR_CHRISTELLE  # Chemin vers le répertoire contenant les images et annotations
+    annotations_dir = ANNOTATIONS_DIR_CHRISTELLE  # Chemin vers le répertoire contenant les annotations
     batch_size = 8
     epochs = 10
 
     # Chargement des données
-    dataset = MonkeyDataset(data_dir)
+    dataset = MonkeyDataset(data_dir, annotations_dir)
+    print(f"Dataset size: {len(dataset)}")
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # Modèle et optimisation
