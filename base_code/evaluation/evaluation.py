@@ -3,6 +3,9 @@ import os
 import numpy as np
 from sklearn.metrics import auc
 
+GROUND_TRUTH_DIR = r"C:\Users\Christelle\Documents\CHALLENGE\annotations\json_mm"
+PREDICTIONS_DIR = r"C:\Users\Christelle\Documents\CHALLENGE\Challenge_TI\base_code\evaluation\test\output"
+
 def calculate_froc(gt_dir, pred_dir, thresholds=np.linspace(0.1, 1.0, 10)):
     # Chargement des annotations et prédictions
     gt_files = [f for f in os.listdir(gt_dir) if f.endswith(".json")]
@@ -29,7 +32,7 @@ def calculate_froc(gt_dir, pred_dir, thresholds=np.linspace(0.1, 1.0, 10)):
             total_gt += len(gt_data["inflammatory-cells"])
             for pred in pred_data.get("detections", []):
                 if pred["confidence"] >= threshold:
-                    if self._is_match(pred, gt_data["inflammatory-cells"]):
+                    if _is_match(pred, gt_data["inflammatory-cells"]):
                         tp += 1
                     else:
                         fp += 1
@@ -53,8 +56,8 @@ def _is_match(self, pred, gt_list, distance_threshold=10):
 
 if __name__ == "__main__":
     metrics = calculate_froc(
-        gt_dir="evaluation/ground_truth",
-        pred_dir="evaluation/test/output"
+        gt_dir= GROUND_TRUTH_DIR,
+        pred_dir= PREDICTIONS_DIR,
     )
     with open("evaluation/test/output/metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)

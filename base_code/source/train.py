@@ -4,9 +4,13 @@ from dataset import MonkeyDataset
 from model import HybridModel
 import torch.optim as optim
 
+DATA_DIR_CHRISTELLE = r"C:\Users\Christelle\Documents\CHALLENGE\images"
+# DATA_DIR_ADAM = 
+TRAINED_MODEL_PATH = r"C:\Users\Christelle\Documents\CHALLENGE\Challenge_TI\base_code\trained_model"
+
 def train():
     # Config
-    data_dir = "data/train"
+    data_dir = DATA_DIR_CHRISTELLE  # Chemin vers le répertoire contenant les images et annotations
     batch_size = 8
     epochs = 10
 
@@ -30,7 +34,8 @@ def train():
         print(f"Epoch {epoch}, Loss: {loss.item()}")
 
     # Sauvegarde du modèle
-    torch.save(model.state_dict(), "model.pth")
+    torch.save(model.state_dict(), TRAINED_MODEL_PATH)
 
 if __name__ == "__main__":
     train()
+    print("Training completed and model saved as model.pth")
